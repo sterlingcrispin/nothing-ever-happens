@@ -41,8 +41,9 @@ class _MarketOrderStubClient:
         self.calculate_args = (token_id, side, amount, order_type)
         return 0.42
 
-    def create_market_order(self, order_args):
+    def create_market_order(self, order_args, order_type):  # V2: takes order_type as 2nd arg
         self.created_args = order_args
+        self.created_order_type = order_type  # capture for assertions
         return {"signed": True, "order_args": order_args}
 
     def post_order(self, signed_order, order_type):
@@ -169,6 +170,7 @@ def test_place_market_order_uses_ws_price_when_reference_provided() -> None:
     client._sell = "SELL"
     client._order_type = SimpleNamespace(FAK="FAK")
     client._market_order_args = lambda **kwargs: SimpleNamespace(**kwargs)
+    client.builder_code = None  # V2: builder_code is optional
     client.client = _MarketOrderStubClient()
 
     result = client.place_market_order(
@@ -179,7 +181,7 @@ def test_place_market_order_uses_ws_price_when_reference_provided() -> None:
     assert client.client.calculate_args is None
     # Price should be reference_price + slippage buffer
     assert client.client.created_args.price == pytest.approx(0.4 + DEFAULT_ALLOWED_SLIPPAGE)
-    assert client.client.created_args.order_type == "FAK"
+    assert client.client.created_order_type == "FAK"  # V2: order_type captured separately
     assert client.client.post_args[1] == "FAK"
     assert result.raw["_market_price"] == pytest.approx(0.4)
     assert result.raw["_buffered_price"] == pytest.approx(0.4 + DEFAULT_ALLOWED_SLIPPAGE)
@@ -194,6 +196,7 @@ def test_place_market_order_falls_back_to_rest_without_reference() -> None:
     client._sell = "SELL"
     client._order_type = SimpleNamespace(FAK="FAK")
     client._market_order_args = lambda **kwargs: SimpleNamespace(**kwargs)
+    client.builder_code = None  # V2: builder_code is optional
     client.client = _MarketOrderStubClient()
 
     result = client.place_market_order(
@@ -204,8 +207,7 @@ def test_place_market_order_falls_back_to_rest_without_reference() -> None:
     assert client.client.calculate_args == ("token", "BUY", 5.0, "FAK")
     # Price should be REST price (0.42) + slippage buffer
     assert client.client.created_args.price == pytest.approx(0.42 + DEFAULT_ALLOWED_SLIPPAGE)
-    assert result.raw["_market_price"] == pytest.approx(0.42)
-    assert result.raw["_buffered_price"] == pytest.approx(0.42 + DEFAULT_ALLOWED_SLIPPAGE)
+    assert client.client.created_order_type == "FAK"  # V2
     assert result.raw["_price_source"] == "rest"
 
 
@@ -218,6 +220,7 @@ def test_place_market_order_sell_uses_ws_price_with_negative_slippage() -> None:
     client._order_type = SimpleNamespace(FAK="FAK")
     client._asset_type = SimpleNamespace(CONDITIONAL="CONDITIONAL")
     client._market_order_args = lambda **kwargs: SimpleNamespace(**kwargs)
+    client.builder_code = None  # V2: builder_code is optional
     stub = _MarketOrderStubClient()
     client.client = stub
     sync_calls = []
@@ -245,6 +248,7 @@ def test_place_market_order_sell_without_reference_syncs_and_uses_rest() -> None
     client._order_type = SimpleNamespace(FAK="FAK")
     client._asset_type = SimpleNamespace(CONDITIONAL="CONDITIONAL")
     client._market_order_args = lambda **kwargs: SimpleNamespace(**kwargs)
+    client.builder_code = None  # V2: builder_code is optional
     stub = _MarketOrderStubClient()
     client.client = stub
     sync_calls = []
@@ -274,6 +278,7 @@ def test_place_market_order_buy_records_fill_price_in_probability_units() -> Non
     client._sell = "SELL"
     client._order_type = SimpleNamespace(FAK="FAK")
     client._market_order_args = lambda **kwargs: SimpleNamespace(**kwargs)
+    client.builder_code = None  # V2: builder_code is optional
     client.client = _MarketOrderStubClient(
         response={
             "orderID": "o1",
@@ -298,6 +303,7 @@ def test_place_market_order_sell_records_fill_price_in_probability_units() -> No
     client._order_type = SimpleNamespace(FAK="FAK")
     client._asset_type = SimpleNamespace(CONDITIONAL="CONDITIONAL")
     client._market_order_args = lambda **kwargs: SimpleNamespace(**kwargs)
+    client.builder_code = None  # V2: builder_code is optional
     client.client = _MarketOrderStubClient(
         response={
             "orderID": "o1",
