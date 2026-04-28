@@ -78,7 +78,7 @@ def fetch_trades_authenticated(after_ts: int) -> list[dict]:
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         from bot.config import load_nothing_happens_config
         from bot.exchange.polymarket_clob import PolymarketClobExchangeClient
-        from py_clob_client.clob_types import TradeParams
+        from py_clob_client_v2.clob_types import TradeParams
 
         exchange_cfg, _ = load_nothing_happens_config()
         client = PolymarketClobExchangeClient(exchange_cfg, allow_trading=False)

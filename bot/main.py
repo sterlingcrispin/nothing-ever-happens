@@ -68,24 +68,12 @@ def _resolve_live_wallet_address(exchange_cfg) -> str | None:
         raise ValueError("Could not derive live wallet address from PRIVATE_KEY") from exc
 
 
-def _patch_clob_http_timeout() -> None:
-    """Increase py-clob-client's httpx read timeout from 5s to 12s."""
-    try:
-        import httpx
-        from py_clob_client.http_helpers import helpers
 
-        helpers._http_client = httpx.Client(
-            http2=True,
-            timeout=httpx.Timeout(connect=5.0, read=12.0, write=5.0, pool=5.0),
-        )
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Failed to patch CLOB HTTP timeout: %s", exc)
 
 
 async def run():
     load_dotenv()
     configure_logging(os.getenv("LOG_LEVEL", "INFO"))
-    _patch_clob_http_timeout()
 
     exchange_cfg, strategy_cfg = load_nothing_happens_config()
     strategy_wallet_address = _resolve_live_wallet_address(exchange_cfg)
