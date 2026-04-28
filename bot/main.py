@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 import signal
+import sys
 import time
 
 import aiohttp
@@ -175,8 +176,9 @@ async def run():
         shutdown.set()
 
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, on_signal)
+    if sys.platform != "win32":
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, on_signal)
 
     async with aiohttp.ClientSession() as session:
         if redeemer is not None:
