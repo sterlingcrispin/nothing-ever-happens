@@ -28,8 +28,8 @@ TOKEN_DECIMAL_FACTOR = 10**6  # Both USDC and conditional tokens use 6 decimals 
 class PolymarketClobExchangeClient:
     def __init__(self, config: ExchangeConfig, allow_trading: bool) -> None:
         try:
-            from py_clob_client.client import ClobClient
-            from py_clob_client.clob_types import (
+            from py_clob_client_v2.client import ClobClient
+            from py_clob_client_v2.clob_types import (
                 AssetType,
                 BalanceAllowanceParams,
                 MarketOrderArgs,
@@ -38,10 +38,10 @@ class PolymarketClobExchangeClient:
                 OrderType,
                 TradeParams,
             )
-            from py_clob_client.order_builder.constants import BUY, SELL
+            from py_clob_client_v2.order_builder.constants import BUY, SELL
         except ImportError as exc:
             raise RuntimeError(
-                "Missing dependency py-clob-client. Install with: pip install -r requirements.txt"
+                "Missing dependency py-clob-client-v2. Install with: pip install -r requirements.txt"
             ) from exc
 
         self.allow_trading = allow_trading
@@ -49,6 +49,7 @@ class PolymarketClobExchangeClient:
         self.signature_type = config.signature_type
         self.funder_address = config.funder_address
         self.chain_id = config.chain_id
+        self.builder_code = getattr(config, "builder_code", None)
         self.rpc_url = (os.getenv("POLYGON_RPC_URL") or "").strip()
         self._asset_type = AssetType
         self._balance_allowance_params = BalanceAllowanceParams
@@ -60,21 +61,34 @@ class PolymarketClobExchangeClient:
         self._buy = BUY
         self._sell = SELL
 
-        client_kwargs: dict[str, Any] = {"chain_id": config.chain_id}
+        # V2: all params as kwargs. L2 auth via api_key/api_secret/api_passphrase.
+        client_kwargs: dict[str, Any] = {
+            "host": config.host,
+            "chain_id": config.chain_id,
+        }
         if config.private_key:
             client_kwargs["key"] = config.private_key
-            client_kwargs["signature_type"] = config.signature_type
+            if config.signature_type is not None:
+                client_kwargs["signature_type"] = config.signature_type
         if config.funder_address:
             client_kwargs["funder"] = config.funder_address
 
-        self.client = ClobClient(config.host, **client_kwargs)
+        # L2 API credentials (HMAC) — env vars unchanged from V1
+        # Compatible with existing POLY_API_KEY / POLY_SECRET / POLY_PASSPHRASE
+        api_key = (os.getenv("POLY_API_KEY") or "").strip() or None
+        api_secret = (os.getenv("POLY_API_SECRET") or os.getenv("POLY_SECRET") or "").strip() or None
+        api_passphrase = (os.getenv("POLY_API_PASSPHRASE") or os.getenv("POLY_PASS_PHRASE") or "").strip() or None
+        if api_key:
+            client_kwargs["api_key"] = api_key
+        if api_secret:
+            client_kwargs["api_secret"] = api_secret
+        if api_passphrase:
+            client_kwargs["api_passphrase"] = api_passphrase
+
+        self.client = ClobClient(**client_kwargs)
 
         if self.allow_trading and not config.private_key:
             raise ValueError("PRIVATE_KEY is required when order transmission is enabled")
-
-        if config.private_key:
-            creds = self.client.create_or_derive_api_creds()
-            self.client.set_api_creds(creds)
 
     def get_mid_price(self, token_id: str) -> float:
         midpoint = self.client.get_midpoint(token_id)
@@ -130,12 +144,11 @@ class PolymarketClobExchangeClient:
         )
 
     def warm_token_cache(self, token_id: str) -> None:
-        """Pre-fetch tick_size, neg_risk, fee_rate for a token so
-        create_market_order doesn't hit the network on first trade."""
+        """Pre-fetch tick_size, neg_risk for a token so
+        place_market_order doesn't hit the network on first trade."""
         try:
             self.client.get_tick_size(token_id)
             self.client.get_neg_risk(token_id)
-            self.client.get_fee_rate_bps(token_id)
         except Exception as e:
             logger.warning("warm_token_cache failed for %s: %s", token_id[:20], e)
 
@@ -186,12 +199,18 @@ class PolymarketClobExchangeClient:
             raise RuntimeError("Order transmission is disabled")
 
         side = self._buy if order.side == Side.BUY else self._sell
-        order_args = self._order_args(
-            price=order.price,
-            size=order.size,
-            side=side,
-            token_id=order.token_id,
-        )
+        # V2: removed feeRateBps, nonce, taker; expiration=0 for GTC; optional builder
+        order_kwargs: dict[str, Any] = {
+            "price": order.price,
+            "size": order.size,
+            "side": side,
+            "token_id": order.token_id,
+            "expiration": 0,  # GTC
+        }
+        if self.builder_code:
+            order_kwargs["builder"] = self.builder_code
+
+        order_args = self._order_args(**order_kwargs)
         signed_order = self.client.create_order(order_args)
         response: Any = self.client.post_order(signed_order, self._order_type.GTC)
 
@@ -252,14 +271,19 @@ class PolymarketClobExchangeClient:
             buffered_price = _clamp_probability(
                 market_price + allowed_slippage if order.side == Side.BUY else market_price - allowed_slippage
             )
-        order_args = self._market_order_args(
-            token_id=order.token_id,
-            amount=order.amount,
-            side=side,
-            price=buffered_price,
-            order_type=self._order_type.FAK,
-        )
-        signed_order = self.client.create_market_order(order_args)
+        # V2: MarketOrderArgs no longer takes order_type parameter
+        order_kwargs: dict[str, Any] = {
+            "token_id": order.token_id,
+            "amount": order.amount,
+            "side": side,
+            "price": buffered_price,
+        }
+        if self.builder_code:
+            order_kwargs["builder"] = self.builder_code
+
+        order_args = self._market_order_args(**order_kwargs)
+        # create_market_order takes order_type as separate parameter
+        signed_order = self.client.create_market_order(order_args, self._order_type.FAK)
         response = self._post_order_with_sell_retry(signed_order, order)
 
         if not isinstance(response, dict):
@@ -424,9 +448,9 @@ class PolymarketClobExchangeClient:
         return snapshot["balance"]
 
     def get_collateral_balance(self) -> float:
-        """Get the USDC collateral balance in human-readable units.
+        """Get the pUSD collateral balance in human-readable units (6 decimals).
 
-        Used by the daily drawdown circuit-breaker (audit fix F1).
+        V2: Polymarket USD (pUSD) replaces USDC.e as the collateral token.
         """
         self._sync_balance_allowance(self._asset_type.COLLATERAL)
         snapshot = self._get_balance_allowance(self._asset_type.COLLATERAL)
@@ -727,17 +751,11 @@ def _collect_float_values(value: Any) -> list[float]:
 
 
 def _extract_trade_fee(trade: dict[str, Any], price: float, size: float, fallback: dict[str, Any] | None = None) -> float:
+    # V2: fees are now directly reported by the exchange; no fee_rate_bps field
     raw_fee = trade.get("fee")
     if raw_fee not in {None, ""}:
         return _coerce_float(raw_fee, field_name="fee")
-
-    fee_rate_bps = trade.get("fee_rate_bps")
-    if fee_rate_bps in {None, ""} and fallback is not None:
-        fee_rate_bps = fallback.get("fee_rate_bps")
-    if fee_rate_bps in {None, ""}:
-        return 0.0
-
-    return price * size * _coerce_float(fee_rate_bps, field_name="fee_rate_bps") / 10000.0
+    return 0.0
 
 
 def _coerce_float(raw: Any, field_name: str) -> float:

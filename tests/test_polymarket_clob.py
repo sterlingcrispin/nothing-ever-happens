@@ -86,7 +86,7 @@ def test_get_trades_parses_live_taker_shape() -> None:
                 "asset_id": "token",
                 "side": "BUY",
                 "size": "13",
-                "fee_rate_bps": "0",
+                "fee": "0",  # V2: fee directly reported
                 "price": "0.36",
                 "status": "MATCHED",
                 "match_time": "2026-03-07T21:20:17Z",
@@ -105,6 +105,7 @@ def test_get_trades_parses_live_taker_shape() -> None:
     assert trades[0].price == 0.36
     assert trades[0].size == 13.0
     assert trades[0].timestamp == "2026-03-07T21:20:17Z"
+    assert trades[0].fee == 0.0  # V2: fee extracted directly
 
 
 def test_get_trades_parses_maker_rows() -> None:
@@ -126,7 +127,8 @@ def test_get_trades_parses_maker_rows() -> None:
                         "side": "SELL",
                         "price": "0.36",
                         "matched_amount": "4",
-                        "fee_rate_bps": "10",
+                        # V2: fee is directly reported on each order; maker fee is 0
+                        "fee": "0.00144",
                     }
                 ],
             }
