@@ -80,6 +80,7 @@ class ExchangeConfig:
     signature_type: int
     private_key: str | None
     funder_address: str | None
+    builder_code: str | None = None  # V2: optional builder attribution code
     live_send_enabled: bool = False
 
     def validate(self) -> None:
@@ -110,6 +111,7 @@ def _build_exchange_config(conn: dict[str, Any]) -> ExchangeConfig:
         signature_type=int(conn.get("signature_type", 2)),
         private_key=_env_optional("PRIVATE_KEY"),
         funder_address=_env_optional("FUNDER_ADDRESS"),
+        builder_code=_env_optional("BUILDER_CODE"),
         live_send_enabled=_compute_live_send_enabled(),
     )
     exchange.validate()
