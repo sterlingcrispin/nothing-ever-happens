@@ -1,6 +1,6 @@
 {
   "connection": {
-    "host": "https://clob-v2.polymarket.com",
+    "host": "https://clob.polymarket.com",
     "chain_id": 137,
     "signature_type": 2
   },
